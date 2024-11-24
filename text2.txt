@@ -1,0 +1,123 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as anm
+from matplotlib.animation import FFMpegWriter
+import random
+
+GRID_SIZE = 50
+
+# Obstacles
+OBSTACLES = set()
+while len(OBSTACLES) < 300:
+    OBSTACLES.add((random.randint(0, GRID_SIZE-1), random.randint(0, GRID_SIZE-1)))
+OBSTACLES = list(OBSTACLES)
+
+# Robots and Goals
+ROBOTS = [(random.randint(0, GRID_SIZE-1), random.randint(0, GRID_SIZE-1)) for _ in range(60)]
+GOALS = [(random.randint(0, GRID_SIZE-1), random.randint(0, GRID_SIZE-1)) for _ in range(60)]
+
+def astar(grid, start, goal, closed_set):
+    def heuristic(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    open_set = {start}
+    came_from = {}
+    g_score = {node: float('inf') for row in grid for node in row}
+    g_score[start] = 0
+    f_score = {node: float('inf') for row in grid for node in row}
+    f_score[start] = heuristic(start, goal)
+
+    while open_set:
+        current = min(open_set, key=lambda x: f_score[x])
+        if current == goal:
+            path = []
+            while current in came_from:
+                path.append(current)
+                current = came_from[current]
+            return path[::-1]
+
+        open_set.remove(current)
+        closed_set.add(current)
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            neighbor = (current[0] + dx, current[1] + dy)
+            if 0 <= neighbor[0] < GRID_SIZE and 0 <= neighbor[1] < GRID_SIZE and neighbor not in OBSTACLES and neighbor not in closed_set:
+                tentative_g_score = g_score[current] + 1
+                if neighbor not in g_score or tentative_g_score < g_score[neighbor]:
+                    came_from[neighbor] = current
+                    g_score[neighbor] = tentative_g_score
+                    f_score[neighbor] = g_score[neighbor] + heuristic(neighbor, goal)
+                    open_set.add(neighbor)
+    return []
+# Generate paths for each robot
+paths = []
+for i in range(len(ROBOTS)):
+    closed_set = set()
+    path = astar([[0] * GRID_SIZE for _ in range(GRID_SIZE)], ROBOTS[i], GOALS[i], closed_set)
+    paths.append(path)
+# Generate paths for each robot
+paths = []
+for i in range(len(ROBOTS)):
+    closed_set = set()
+    path = astar([[0] * GRID_SIZE for _ in range(GRID_SIZE)], ROBOTS[i], GOALS[i], closed_set)
+    paths.append(path)
+
+# Generate paths for each robot
+paths = []
+for start, goal in zip(ROBOTS, GOALS):
+    closed_set = set()
+    path = astar([[0] * GRID_SIZE for _ in range(GRID_SIZE)], start, goal, closed_set)
+    paths.append(path)
+
+# Check for conflicts
+conflicts = set()
+for i, path1 in enumerate(paths):
+    for j, path2 in enumerate(paths):
+        if i != j and path1 and path2:
+            if path1[-1] == path2[-1]:
+                conflicts.add(i)
+                conflicts.add(j)
+
+# Assign priority to robots
+priorities = {i: 0 for i in range(len(ROBOTS))}
+for conflict in conflicts:
+    priorities[conflict] = 1
+
+# Resolve conflicts
+for i, path1 in enumerate(paths):
+    if priorities[i] == 0:
+        for j, path2 in enumerate(paths):
+            if i != j and path1 and path2 and path1[-1] == path2[-1]:
+                paths[j] = path2[:len(path2)-1]  # Truncate path of robot j at conflict point
+
+# Simulation
+fig, ax = plt.subplots(figsize=(6, 6))
+ax.set_xlim(-0.5, GRID_SIZE - 0.5)
+ax.set_ylim(-0.5, GRID_SIZE - 0.5)
+ax.set_xticks(range(GRID_SIZE))
+ax.set_yticks(range(GRID_SIZE))
+ax.grid(True)
+
+# Draw obstacles
+for obs in OBSTACLES:
+    ax.add_patch(plt.Rectangle((obs[1] - 0.5, obs[0] - 0.5), 1, 1, color="gray"))
+
+# Robots and goals
+robot_patches = [plt.Circle((x, y), 0.3, color=plt.cm.hsv(i / len(ROBOTS))) for i, (x, y) in enumerate(ROBOTS)]
+goal_patches = [plt.Circle((x, y), 0.3, color="green") for x, y in GOALS]
+
+for patch in robot_patches + goal_patches:
+    ax.add_patch(patch)
+
+# Animation update function
+def update(frame):
+    for i, path in enumerate(paths):
+        if frame < len(path):
+            robot_patches[i].center = path[frame][1], path[frame][0]
+    return robot_patches
+
+# Create animation
+frames = max(len(path) for path in paths)
+ani = anm.FuncAnimation(fig, update, frames=frames, interval=500, blit=True)
+
+plt.show()
+

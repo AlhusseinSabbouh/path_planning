@@ -1,0 +1,167 @@
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import numpy as np
+import heapq
+from collections import defaultdict
+
+# Define the grid environment and obstacles
+GRID_SIZE = 10
+OBSTACLES = [(3,3) ,(2, 3), (4, 3), (5, 3), (6, 3), (7, 3), (8, 3), (7, 4), (8, 4), (7, 5), (8, 5),(9,4)]
+
+# Helper function to generate a grid-based graph
+def create_graph(grid_size, obstacles):
+    graph = defaultdict(list)
+    for x in range(grid_size):
+        for y in range(grid_size):
+            if (x, y) in obstacles:
+                continue
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < grid_size and 0 <= ny < grid_size and (nx, ny) not in obstacles:
+                    graph[(x, y)].append((nx, ny))
+    return graph
+
+# PD* Algorithm Implementation (same as before)
+class PDStarAlgorithm:
+    def __init__(self, graph, start, goal, robots):
+        self.graph = graph
+        self.start = start
+        self.goal = goal
+        self.robots = robots
+
+        self.U = []
+        self.g = defaultdict(lambda: float('inf'))
+        self.rhs = defaultdict(lambda: float('inf'))
+        self.km = 0
+
+    def heuristic(self, a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def calculate_key(self, i, s):
+        return [
+            min(self.g[s], self.rhs[s]) + self.heuristic(self.start[i], s) + self.km,
+            min(self.g[s], self.rhs[s])
+        ]
+
+    def initialize(self, i):
+        self.U = []
+        self.km = 0
+        self.g[self.goal[i]] = float('inf')
+        self.rhs[self.goal[i]] = 0
+        heapq.heappush(self.U, (self.calculate_key(i, self.goal[i]), self.goal[i]))
+
+    def update_vertex(self, i, u):
+        if u != self.goal[i]:
+            self.rhs[u] = min(self.g[v] + 1 for v in self.graph[u])
+        if u in [u for _, u in self.U]:
+            self.U = [(k, v) for k, v in self.U if v != u]
+            heapq.heapify(self.U)
+        if self.g[u] != self.rhs[u]:
+            heapq.heappush(self.U, (self.calculate_key(i, u), u))
+
+    def compute_shortest_path(self, i):
+        while (self.U and self.U[0][0] < self.calculate_key(i, self.start[i])) or self.rhs[self.start[i]] != self.g[self.start[i]]:
+            k_old, u = heapq.heappop(self.U)
+            if k_old < self.calculate_key(i, u):
+                heapq.heappush(self.U, (self.calculate_key(i, u), u))
+            elif self.g[u] > self.rhs[u]:
+                self.g[u] = self.rhs[u]
+                for s in self.graph[u]:
+                    self.update_vertex(i, s)
+            else:
+                self.g[u] = float('inf')
+                for s in self.graph[u] + [u]:
+                    self.update_vertex(i, s)
+
+    def compute_freedom(self, i, u):
+        freedom_index = 0
+        for v in self.graph[u]:
+            if self.g[v] + 1 == self.g[u]:
+                freedom_index += 1
+        return freedom_index
+
+    def resolve_conflict(self, succ_steps, priority_order):
+        priority_order.sort(key=lambda x: x[1])
+        for idx, _ in priority_order:
+            for jdx, _ in priority_order:
+                if jdx != idx and jdx in succ_steps and idx in succ_steps and succ_steps[jdx] == succ_steps[idx]:
+                    succ_steps[idx] = self.start[idx]
+        return succ_steps
+
+    def run(self):
+        succ_steps = {}
+        priority_order = []
+
+        for i in range(len(self.robots)):
+            self.initialize(i)
+            self.compute_shortest_path(i)
+
+            if self.g[self.start[i]] == float('inf'):
+                print("No path found for robot", i)
+                return None
+
+            next_step = min(
+                [(v, self.g[v]) for v in self.graph[self.start[i]]],
+                key=lambda x: x[1]
+            )[0]
+            succ_steps[i] = next_step
+            priority_order.append((i, self.compute_freedom(i, self.start[i])))
+
+        succ_steps = self.resolve_conflict(succ_steps, priority_order)
+
+        for i in range(len(self.robots)):
+            self.start[i] = succ_steps[i]
+            for (u, v) in self.graph.items():
+                self.update_vertex(i, u)
+            self.compute_shortest_path(i)
+
+        return succ_steps
+
+# Simulation and Visualization
+def simulate_and_animate(grid_size, obstacles, starts, goals):
+    fig, ax = plt.subplots(figsize=(8, 8))
+    ax.set_xlim(-0.5, grid_size - 0.5)
+    ax.set_ylim(-0.5, grid_size - 0.5)
+    ax.set_xticks(range(grid_size))
+    ax.set_yticks(range(grid_size))
+    ax.grid(True)
+
+    robots = starts
+    graph = create_graph(grid_size, obstacles)
+    pd_star = PDStarAlgorithm(graph, starts, goals, robots)
+    paths = [starts.copy()]
+
+    def update(frame):
+        nonlocal robots
+        succ_steps = pd_star.run()
+        robots = [succ_steps[i] if i in succ_steps else robots[i] for i in range(len(robots))]
+        paths.append(robots)
+
+        ax.clear()
+        ax.set_xlim(-0.5, grid_size - 0.5)
+        ax.set_ylim(-0.5, grid_size - 0.5)
+        ax.set_xticks(range(grid_size))
+        ax.set_yticks(range(grid_size))
+        ax.grid(True)
+
+        for obs in obstacles:
+            rect = plt.Rectangle((obs[0] - 0.5, obs[1] - 0.5), 1, 1, color='black')
+            ax.add_patch(rect)
+
+        for i, pos in enumerate(robots):
+            circ = plt.Circle((pos[0], pos[1]), 0.3, color=f'C{i}')
+            ax.add_patch(circ)
+
+        for path in paths:
+            for i, (x, y) in enumerate(path):
+                ax.plot(x, y, marker='o', markersize=4, color=f'C{i}')
+
+    ani = animation.FuncAnimation(fig, update, frames=50, interval=500, repeat=False)
+    plt.show()
+
+# Example Usage
+STARTS = [(8, 1), (7, 0),(9,2)]  # More robots added
+GOALS = [(8, 8), (8, 7), (6,8)]
+simulate_and_animate(GRID_SIZE, OBSTACLES, STARTS, GOALS)
+
+

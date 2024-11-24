@@ -1,0 +1,152 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import heapq
+
+# Define the grid environment
+class GridWorld:
+    def __init__(self, size, obstacle_density=0.2):
+        self.size = size
+        self.grid = np.zeros((size, size), dtype=int)
+        self.place_obstacles(obstacle_density)
+        self.robots = []
+
+    def place_obstacles(self, density):
+        num_obstacles = int(density * self.size**2)
+        for _ in range(num_obstacles):
+            x, y = np.random.randint(0, self.size, size=2)
+            self.grid[x, y] = -1  # Mark as obstacle
+
+    def add_robot(self, start, goal):
+        self.robots.append({"start": start, "goal": goal, "path": [], "position": start})
+
+    def is_free(self, position):
+        x, y = position
+        return 0 <= x < self.size and 0 <= y < self.size and self.grid[x, y] == 0
+
+# D* Lite pathfinding
+class DStarLite:
+    def __init__(self, grid, start, goal):
+        self.grid = grid
+        self.start = start
+        self.goal = goal
+        self.g = {}  # Cost to reach node
+        self.rhs = {}  # One-step lookahead cost
+        self.open_list = []
+        self.km = 0
+        self.initialize()
+
+    def initialize(self):
+        self.g = {self.goal: float('inf')}
+        self.rhs = {self.goal: 0}
+        self.open_list = []
+        self.insert(self.goal, self.calculate_key(self.goal))
+
+    def calculate_key(self, node):
+        g_rhs = min(self.g.get(node, float('inf')), self.rhs.get(node, float('inf')))
+        return (g_rhs + self.heuristic(self.start, node) + self.km, g_rhs)
+
+    def insert(self, node, key):
+        heapq.heappush(self.open_list, (key, node))
+
+    def heuristic(self, node1, node2):
+        return abs(node1[0] - node2[0]) + abs(node1[1] - node2[1])
+
+    def update_vertex(self, node):
+        if node != self.goal:
+            successors = self.get_successors(node)
+            self.rhs[node] = min(self.cost(node, s) + self.g.get(s, float('inf')) for s in successors)
+        if self.g.get(node, float('inf')) != self.rhs.get(node, float('inf')):
+            self.insert(node, self.calculate_key(node))
+
+    def get_successors(self, node):
+        x, y = node
+        directions = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+        successors = [(x + dx, y + dy) for dx, dy in directions]
+        return [s for s in successors if self.grid.is_free(s)]
+
+    def cost(self, node1, node2):
+        if not self.grid.is_free(node2):
+            return float('inf')
+        return 1
+
+    def compute_shortest_path(self):
+        while self.open_list and (self.open_list[0][0] < self.calculate_key(self.start) or
+                                  self.rhs[self.start] != self.g.get(self.start, float('inf'))):
+            _, current = heapq.heappop(self.open_list)
+            if self.g.get(current, float('inf')) > self.rhs.get(current, float('inf')):
+                self.g[current] = self.rhs[current]
+                for pred in self.get_successors(current):
+                    self.update_vertex(pred)
+            else:
+                self.g[current] = float('inf')
+                for pred in self.get_successors(current) + [current]:
+                    self.update_vertex(pred)
+
+    def get_path(self):
+        self.compute_shortest_path()
+        path = []
+        current = self.start
+        while current != self.goal:
+            path.append(current)
+            successors = self.get_successors(current)
+            current = min(successors, key=lambda s: self.g.get(s, float('inf')))
+        path.append(self.goal)
+        return path
+
+# Simulation with animation
+class PDSimulation:
+    def __init__(self, grid_size, obstacle_density, robots):
+        self.world = GridWorld(grid_size, obstacle_density)
+        for start, goal in robots:
+            self.world.add_robot(start, goal)
+
+    def run(self):
+        for robot in self.world.robots:
+            dstar = DStarLite(self.world, robot["start"], robot["goal"])
+            robot["path"] = dstar.get_path()
+
+    def animate(self):
+        fig, ax = plt.subplots(figsize=(6, 6))
+        grid = self.world.grid.copy()
+
+        # Initialize the animation
+        def init():
+            ax.imshow(grid, cmap="tab10", origin="upper")
+            ax.set_title("Multi-Robot Pathfinding")
+            ax.grid(True)
+
+        # Update the grid for each frame
+        def update(frame):
+            grid[:] = self.world.grid  # Reset grid
+            for robot in self.world.robots:
+                if frame < len(robot["path"]):
+                    x, y = robot["path"][frame]
+                    grid[x, y] = -2  # Mark robot's current position
+            ax.clear()
+            ax.imshow(grid, cmap="tab10", origin="upper")
+            ax.set_title(f"Step {frame}")
+            ax.grid(True)
+
+        # Compute the number of frames needed
+        max_steps = max(len(robot["path"]) for robot in self.world.robots)
+        ani = animation.FuncAnimation(fig, update, frames=max_steps, init_func=init, repeat=False)
+        plt.show()
+
+# Initialize simulation
+robots = [
+    ((0, 0), (29, 29)),
+    ((29, 0), (0, 29)),
+    ((15, 15), (10, 10)),
+    ((25, 10), (15, 20)),
+    ((10, 25), (20, 15)),
+    ((5, 5), (25, 25)),
+    ((25, 5), (5, 25)),
+]
+sim = PDSimulation(grid_size=30, obstacle_density=0.2, robots=robots)
+
+# Run the simulation
+sim.run()
+
+# Animate the results
+sim.animate()
